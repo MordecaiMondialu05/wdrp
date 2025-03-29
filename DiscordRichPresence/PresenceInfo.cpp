@@ -2,6 +2,8 @@
 #include "PresenceInfo.h"
 #include "DiscordRichPresence.h"
 #include "SettingsFile.h"
+#include <windows.h>
+#include "wa_ipc.h"
 
 PresenceInfo::PresenceInfo()
 	: m_initializeFn{}
@@ -44,9 +46,7 @@ void PresenceInfo::ClearDetails()
 {
 	m_lowLevelTrackTitleBuffer.clear();
 	m_lowLevelTrackTitleIsUrl = false;
-
 	m_streamingTrackTitleBuffer.clear();
-
 	m_presence.details = nullptr;
 }
 
@@ -55,15 +55,49 @@ void PresenceInfo::SetStartTimestamp(__int64 timestamp)
 	m_presence.startTimestamp = timestamp;
 }
 
+std::string PresenceInfo::GetAlbumArtPath(const char* filePath)
+{
+	static char albumArtPath[MAX_PATH] = { 0 };
+
+	if (!filePath || !*filePath) return "";
+
+	extendedFileInfoStructW info = { 0 };
+	info.filename = (wchar_t*)filePath;
+	info.metadata = L"cover"; 
+	info.ret = albumArtPath;
+	info.retlen = MAX_PATH;
+
+	SendMessage(hwnd_winamp, WM_WA_IPC, (WPARAM)&info, IPC_GET_EXTENDED_FILE_INFO_HOOKABLE);
+
+	if (wcslen(albumArtPath) > 0)
+	{
+		char convertedPath[MAX_PATH];
+		wcstombs(convertedPath, albumArtPath, MAX_PATH);
+		return std::string(convertedPath);
+	}
+
+	return "";
+}
+
 void PresenceInfo::PostToDiscord()
 {
-	if (m_streamingTrackTitleBuffer.length() > 0) // Streaming title takes precedence
+	if (m_streamingTrackTitleBuffer.length() > 0)
 	{
 		m_presence.details = m_streamingTrackTitleBuffer.c_str();
 	}
 	else
 	{
 		m_presence.details = m_lowLevelTrackTitleBuffer.c_str();
+	}
+
+	std::string albumArtPath = GetAlbumArtPath(m_lowLevelTrackTitleBuffer.c_str());
+	if (!albumArtPath.empty())
+	{
+		m_presence.largeImageKey = albumArtPath.c_str();
+	}
+	else
+	{
+		m_presence.largeImageKey = "winamp-logo";
 	}
 
 	m_updatePresenceFn(&m_presence);
